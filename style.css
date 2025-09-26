@@ -1,0 +1,99 @@
+body {
+  margin: 0;
+  font-family: sans-serif;
+  background: #2c2f33;
+  color: white;
+}
+
+#app {
+  display: flex;
+  height: 100vh;
+}
+
+#sidebar {
+  width: 300px;
+  background: #23272a;
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+}
+
+#chat-log {
+  flex: 1;
+  overflow-y: auto;
+  margin-bottom: 10px;
+  background: #2c2f33;
+  padding: 5px;
+  border-radius: 5px;
+}
+
+#chat-form {
+  display: flex;
+}
+
+#chat-input {
+  flex: 1;
+  padding: 8px;
+  border: none;
+  border-radius: 4px;
+}
+
+#main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+#video-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 10px;
+  padding: 10px;
+}
+
+.video-wrapper {
+  position: relative;
+  background: black;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.video-wrapper video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.name-tag {
+  position: absolute;
+  bottom: 5px;
+  left: 5px;
+  background: rgba(0,0,0,0.6);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+#controls {
+  display: flex;
+  justify-content: center;
+  padding: 10px;
+  background: #23272a;
+  gap: 10px;
+}
+
+#controls button {
+  padding: 12px 20px;
+  font-size: 16px;
+  border: none;
+  border-radius: 8px;
+  background: #40444b;
+  color: white;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+#controls button:hover {
+  background: #5865f2;
+}
