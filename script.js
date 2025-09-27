@@ -1,165 +1,299 @@
-// ===== ユーザー設定 =====
-let username = localStorage.getItem("username") || "ゲスト" + Math.floor(Math.random() * 1000);
-localStorage.setItem("username", username);
-
-// ===== SkyWay初期化 =====
-const peer = new Peer({
-  key: "9c855024-4e55-4756-bf81-a37bcae33004", // ← SkyWayのAPIキーに置き換えてください
-  debug: 2,
-});
+const API_KEY = "9c855024-4e55-4756-bf81-a37bcae33004";
 
 let localStream;
-let connections = {};
+let peer;
 let dataConnections = {};
+let mediaConnections = {};
+let username = "ユーザー";
+let chatHistory = [];
 
-// ===== DOM参照 =====
-const videoGrid = document.getElementById("video-grid");
+let micEnabled = true;
+let camEnabled = true;
+let isSharing = false;
+let displayStream;
+
+// === UI要素 ===
 const chatLog = document.getElementById("chat-log");
-const chatForm = document.getElementById("chat-form");
 const chatInput = document.getElementById("chat-input");
-const btnMic = document.getElementById("btn-mic");
-const btnCam = document.getElementById("btn-cam");
+const chatSend = document.getElementById("chat-send");
+const videos = document.getElementById("videos");
 
-// ===== カメラ・マイク取得 =====
+const muteBtn = document.getElementById("muteBtn");
+const cameraBtn = document.getElementById("cameraBtn");
+const shareBtn = document.getElementById("shareBtn");
+
+const settingsBtn = document.getElementById("settingsBtn");
+const settingsModal = document.getElementById("settingsModal");
+const usernameInput = document.getElementById("usernameInput");
+const micSelect = document.getElementById("micSelect");
+const cameraSelect = document.getElementById("cameraSelect");
+const settingsCancel = document.getElementById("settingsCancel");
+const settingsSave = document.getElementById("settingsSave");
+
+// === 初期化 ===
 navigator.mediaDevices.getUserMedia({ video: true, audio: true })
   .then(stream => {
     localStream = stream;
-    addVideo(stream, peer.id, username, true);
-  })
-  .catch(err => console.error(err));
+    addVideo(stream, "自分");
 
-// ===== Peer接続準備 =====
-peer.on("open", id => {
-  console.log("My peer ID:", id);
-  // 他の参加者に接続
-  peer.listAllPeers(list => {
-    list.forEach(pid => {
-      if (pid !== id) connectToPeer(pid);
+    peer = new Peer({ key: API_KEY, debug: 2 });
+
+    peer.on("open", id => {
+      console.log("My peer ID:", id);
+    });
+
+    peer.on("call", call => {
+      call.answer(localStream);
+      setupMediaConnection(call);
+    });
+
+    peer.on("connection", conn => {
+      setupDataConnection(conn);
+    });
+
+    setInterval(findPeers, 3000);
+  })
+  .catch(err => {
+    console.error(err);
+    alert("カメラとマイクの利用が許可されませんでした。");
+  });
+
+// === 他のPeerを探す ===
+function findPeers() {
+  peer.listAllPeers(peers => {
+    peers.forEach(id => {
+      if (id === peer.id) return;
+      if (!dataConnections[id]) {
+        const conn = peer.connect(id);
+        setupDataConnection(conn);
+      }
+      if (!mediaConnections[id]) {
+        const call = peer.call(id, localStream);
+        setupMediaConnection(call);
+      }
     });
   });
-});
-
-// ===== 呼び出しを受けた場合 =====
-peer.on("call", call => {
-  call.answer(localStream);
-  setupCall(call);
-});
-
-// ===== データ接続を受けた場合 =====
-peer.on("connection", conn => {
-  setupDataConnection(conn);
-});
-
-// ===== 接続関数 =====
-function connectToPeer(peerId) {
-  if (connections[peerId]) return;
-
-  const call = peer.call(peerId, localStream);
-  setupCall(call);
-
-  const conn = peer.connect(peerId);
-  setupDataConnection(conn);
 }
 
-// ===== メディア接続設定 =====
-function setupCall(call) {
-  call.on("stream", stream => {
-    addVideo(stream, call.peer, "???");
-  });
-  call.on("close", () => {
-    removeVideo(call.peer);
-  });
-  connections[call.peer] = call;
-}
-
-// ===== データ接続設定 =====
-function setupDataConnection(conn) {
-  conn.on("open", () => {
-    conn.send({ type: "username", name: username });
-  });
-  conn.on("data", data => {
-    if (data.type === "chat") {
-      appendChat(data.name, data.text);
-    } else if (data.type === "username") {
-      updateName(conn.peer, data.name);
-    }
-  });
-  conn.on("close", () => {
-    removeVideo(conn.peer);
-  });
-  dataConnections[conn.peer] = conn;
-}
-
-// ===== 映像追加 =====
-function addVideo(stream, peerId, name, isLocal = false) {
-  if (document.getElementById("video-" + peerId)) return;
-
+// === ビデオ追加 ===
+function addVideo(stream, labelText, peerId = null) {
   const wrapper = document.createElement("div");
   wrapper.className = "video-wrapper";
-  wrapper.id = "video-" + peerId;
+  if (peerId) wrapper.id = `video-${peerId}`;
 
   const video = document.createElement("video");
   video.srcObject = stream;
   video.autoplay = true;
   video.playsInline = true;
-  if (isLocal) video.muted = true;
 
-  const tag = document.createElement("div");
-  tag.className = "name-tag";
-  tag.textContent = name;
+  const label = document.createElement("div");
+  label.className = "label";
+  label.textContent = labelText;
+  if (peerId) label.id = `label-${peerId}`;
 
   wrapper.appendChild(video);
-  wrapper.appendChild(tag);
-  videoGrid.appendChild(wrapper);
+  wrapper.appendChild(label);
+  videos.appendChild(wrapper);
 }
 
-// ===== 映像削除 =====
-function removeVideo(peerId) {
-  const el = document.getElementById("video-" + peerId);
-  if (el) el.remove();
-  delete connections[peerId];
-  delete dataConnections[peerId];
-}
+// === データ接続 ===
+function setupDataConnection(conn) {
+  dataConnections[conn.peer] = conn;
 
-// ===== 名前更新 =====
-function updateName(peerId, name) {
-  const el = document.querySelector(`#video-${peerId} .name-tag`);
-  if (el) el.textContent = name;
-}
-
-// ===== チャット送受信 =====
-chatForm.addEventListener("submit", e => {
-  e.preventDefault();
-  const text = chatInput.value.trim();
-  if (!text) return;
-  appendChat(username, text);
-  Object.values(dataConnections).forEach(conn => {
-    conn.send({ type: "chat", name: username, text });
+  conn.on("open", () => {
+    conn.send({ type: "username", name: username });
+    if (chatHistory.length > 0) {
+      conn.send({ type: "chatHistory", history: chatHistory });
+    }
   });
+
+  conn.on("data", data => {
+    if (data.type === "username") {
+      const label = document.getElementById(`label-${conn.peer}`);
+      if (label) label.textContent = data.name;
+    }
+    if (data.type === "chat") {
+      if (!chatHistory.some(m => m.id === data.id)) {
+        chatHistory.push(data);
+        appendMessage(data.name, data.text);
+      }
+    }
+    if (data.type === "chatHistory") {
+      data.history.forEach(msg => {
+        if (!chatHistory.some(m => m.id === msg.id)) {
+          chatHistory.push(msg);
+          appendMessage(msg.name, msg.text);
+        }
+      });
+    }
+  });
+
+  conn.on("close", () => {
+    delete dataConnections[conn.peer];
+  });
+}
+
+// === メディア接続 ===
+function setupMediaConnection(call) {
+  mediaConnections[call.peer] = call;
+  call.on("stream", stream => {
+    if (!document.getElementById(`video-${call.peer}`)) {
+      addVideo(stream, call.peer, call.peer);
+    }
+  });
+  call.on("close", () => {
+    const el = document.getElementById(`video-${call.peer}`);
+    if (el) el.remove();
+    delete mediaConnections[call.peer];
+  });
+}
+
+// === チャット送信 ===
+chatSend.addEventListener("click", () => {
+  const msg = chatInput.value.trim();
+  if (msg === "") return;
+  const message = { type: "chat", id: Date.now() + peer.id, name: username, text: msg };
+  chatHistory.push(message);
+  appendMessage(username, msg);
+  Object.values(dataConnections).forEach(conn => conn.send(message));
   chatInput.value = "";
 });
 
-function appendChat(name, text) {
+// === チャット表示 ===
+function appendMessage(name, text) {
   const div = document.createElement("div");
   div.textContent = `${name}: ${text}`;
   chatLog.appendChild(div);
   chatLog.scrollTop = chatLog.scrollHeight;
 }
 
-// ===== マイク・カメラ制御（文字付きボタン） =====
-let micEnabled = true;
-let camEnabled = true;
+// === マイク・カメラ切り替え ===
+function updateButtonUI() {
+  if (micEnabled) {
+    muteBtn.textContent = "マイクON";
+    muteBtn.style.backgroundColor = "green";
+    muteBtn.style.color = "white";
+  } else {
+    muteBtn.textContent = "マイクOFF";
+    muteBtn.style.backgroundColor = "red";
+    muteBtn.style.color = "white";
+  }
 
-btnMic.addEventListener("click", () => {
+  if (camEnabled) {
+    cameraBtn.textContent = "カメラON";
+    cameraBtn.style.backgroundColor = "green";
+    cameraBtn.style.color = "white";
+  } else {
+    cameraBtn.textContent = "カメラOFF";
+    cameraBtn.style.backgroundColor = "red";
+    cameraBtn.style.color = "white";
+  }
+}
+
+muteBtn.addEventListener("click", () => {
   micEnabled = !micEnabled;
-  localStream.getAudioTracks().forEach(track => track.enabled = micEnabled);
-  btnMic.textContent = micEnabled ? "マイクON" : "マイクOFF";
-  btnMic.style.background = micEnabled ? "#40444b" : "red";
+  if (localStream) {
+    localStream.getAudioTracks().forEach(track => (track.enabled = micEnabled));
+  }
+  updateButtonUI();
 });
 
-btnCam.addEventListener("click", () => {
+cameraBtn.addEventListener("click", () => {
   camEnabled = !camEnabled;
-  localStream.getVideoTracks().forEach(track => track.enabled = camEnabled);
-  btnCam.textContent = camEnabled ? "カメラON" : "カメラOFF";
-  btnCam.style.background = camEnabled ? "#40444b" : "red";
+  if (localStream) {
+    localStream.getVideoTracks().forEach(track => (track.enabled = camEnabled));
+  }
+  updateButtonUI();
 });
+
+updateButtonUI();
+
+// === 画面共有 ===
+shareBtn.addEventListener("click", async () => {
+  if (!isSharing) {
+    try {
+      displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      const videoTrack = displayStream.getVideoTracks()[0];
+
+      replaceTrack(videoTrack);
+
+      const selfVideo = document.querySelector(".video-wrapper video");
+      if (selfVideo) {
+        selfVideo.srcObject = displayStream;
+      }
+
+      isSharing = true;
+      shareBtn.textContent = "共有停止";
+      shareBtn.style.backgroundColor = "red";
+      shareBtn.style.color = "white";
+
+      videoTrack.onended = () => {
+        stopSharing();
+      };
+    } catch (err) {
+      console.error("画面共有エラー:", err);
+    }
+  } else {
+    stopSharing();
+  }
+});
+
+function stopSharing() {
+  if (displayStream) {
+    displayStream.getTracks().forEach(track => track.stop());
+  }
+
+  const videoTrack = localStream.getVideoTracks()[0];
+  replaceTrack(videoTrack);
+
+  const selfVideo = document.querySelector(".video-wrapper video");
+  if (selfVideo) {
+    selfVideo.srcObject = localStream;
+  }
+
+  isSharing = false;
+  shareBtn.textContent = "画面共有";
+  shareBtn.style.backgroundColor = "";
+  shareBtn.style.color = "";
+}
+
+function replaceTrack(newTrack) {
+  Object.values(mediaConnections).forEach(call => {
+    const sender = call.peerConnection.getSenders().find(s => s.track && s.track.kind === "video");
+    if (sender) sender.replaceTrack(newTrack);
+  });
+}
+
+// === 設定モーダル ===
+settingsBtn.addEventListener("click", () => {
+  usernameInput.value = username;
+  settingsModal.style.display = "flex";
+  loadDeviceList();
+});
+
+settingsCancel.addEventListener("click", () => {
+  settingsModal.style.display = "none";
+});
+
+settingsSave.addEventListener("click", () => {
+  username = usernameInput.value || "ユーザー";
+  settingsModal.style.display = "none";
+  Object.values(dataConnections).forEach(conn => {
+    conn.send({ type: "username", name: username });
+  });
+});
+
+// === デバイス一覧 ===
+function loadDeviceList() {
+  navigator.mediaDevices.enumerateDevices().then(devices => {
+    micSelect.innerHTML = "";
+    cameraSelect.innerHTML = "";
+    devices.forEach(device => {
+      const option = document.createElement("option");
+      option.value = device.deviceId;
+      option.text = device.label || `${device.kind}`;
+      if (device.kind === "audioinput") micSelect.appendChild(option);
+      if (device.kind === "videoinput") cameraSelect.appendChild(option);
+    });
+  });
+}
